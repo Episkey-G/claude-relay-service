@@ -8,6 +8,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Claude Relay Service 是一个多平台 AI API 中转服务，支持 **Claude (官方/Console)、Gemini、OpenAI Responses (Codex)、AWS Bedrock、Azure OpenAI、Droid (Factory.ai)、CCR** 等多种账户类型。提供完整的多账户管理、API Key 认证、代理配置、用户管理、LDAP认证、Webhook通知和现代化 Web 管理界面。该服务作为客户端（如 Claude Code、Gemini CLI、Codex、Droid CLI、Cherry Studio 等）与 AI API 之间的中间件，提供认证、限流、监控、定价计算、成本统计等功能。
 
+### QuotaLane 子项目
+
+**QuotaLane** 是一个基于 Go + Kratos 框架的微服务项目，提供配额管理和限流功能。该项目采用 Protocol Buffers (Proto3) 定义服务接口，使用 gRPC 进行服务间通信。
+
+**重要提示：QuotaLane Git 提交策略**
+
+QuotaLane 项目采用**源码优先**的 Git 提交策略：
+
+- ✅ **提交内容**：
+  - Proto 源文件（`*.proto`）
+  - 构建配置（`Makefile`、`go.mod`、`go.sum`）
+  - 手写源代码（业务逻辑、数据层、服务层等）
+  - 文档文件（`README.md`、`api/README.md` 等）
+  - 配置文件（`configs/*.yaml`）
+
+- ❌ **不提交内容**（已在 `.gitignore` 中排除）：
+  - Proto 生成的代码：`*.pb.go`、`*_grpc.pb.go`、`*_http.pb.go`
+  - Wire 生成的代码：`wire_gen.go`
+  - 构建产物：二进制文件、临时文件
+
+- 🔄 **CI/CD 验证**：
+  - 生成的代码在 CI/CD 管道中通过 `make proto` 和 `make wire` 自动生成
+  - 确保代码生成的可重复性和一致性
+  - 构建验证在 GitHub Actions 中执行
+
+**提交命令示例**：
+```bash
+cd QuotaLane
+git add api/**/*.proto Makefile go.mod go.sum configs/ cmd/ internal/
+git commit -m "feat: 添加新的 Proto 接口定义"
+```
+
 ## 核心架构
 
 ### 关键架构概念
@@ -146,25 +178,38 @@ Claude Relay Service 是一个多平台 AI API 中转服务，支持 **Claude (�
 
 ````bash
 # 安装依赖和初始化
-npm install
-npm run setup                  # 生成配置和管理员凭据
+npm install                   # 安装后端依赖
 npm run install:web           # 安装Web界面依赖
+npm run build:web             # 构建前端（生成dist目录）
+npm run setup                 # 初始化配置和管理员凭据
 
 # 开发和运行
-npm run dev                   # 开发模式（热重载）
-npm start                     # 生产模式
-npm test                      # 运行测试
-npm run lint                  # 代码检查
+npm run dev                   # 开发模式（nodemon热重载）
+npm start                     # 生产模式（先运行lint）
 
-# Docker部署
-docker-compose up -d          # 推荐方式
-docker-compose --profile monitoring up -d  # 包含监控
+# 代码质量
+npm run lint                  # ESLint检查并自动修复
+npm run lint:check            # ESLint检查（不修复）
+npm run format                # Prettier格式化所有文件
+npm run format:check          # Prettier检查格式
+
+# 测试
+npm test                      # 运行测试套件（Jest + SuperTest）
 
 # 服务管理
 npm run service:start:daemon  # 后台启动（推荐）
+npm run service:start         # 前台启动
+npm run service:restart:daemon # 后台重启
 npm run service:status        # 查看服务状态
 npm run service:logs          # 查看日志
+npm run service:logs:follow   # 实时查看日志
 npm run service:stop          # 停止服务
+
+# Docker部署
+docker-compose up -d          # 启动服务（推荐）
+docker-compose --profile monitoring up -d  # 包含监控
+docker-compose down           # 停止服务
+npm run docker:build          # 构建Docker镜像
 
 ### 开发环境配置
 
@@ -182,7 +227,9 @@ npm run service:stop          # 停止服务
 - `LDAP_TLS_REJECT_UNAUTHORIZED`: LDAP证书验证（默认true）
 - `WEBHOOK_ENABLED`: 启用Webhook通知（默认true）
 - `WEBHOOK_URLS`: Webhook通知URL列表（逗号分隔）
-- `CLAUDE_OVERLOAD_HANDLING_MINUTES`: Claude 529错误处理持续时间（分钟，0表示禁用）
+- `CLAUDE_OVERLOAD_HANDLING_MINUTES`: Claude 529错误处理持续时间（分钟，0表示禁用，最大1440）
+- `CLAUDE_CONSOLE_BLOCKED_HANDLING_MINUTES`: Claude Console 400错误处理持续时间（分钟，0表示禁用，默认10）
+  - 只有匹配特定错误模式的400才会触发（如账户被禁用、会话过多等）
 - `STICKY_SESSION_TTL_HOURS`: 粘性会话TTL（小时，默认1）
 - `STICKY_SESSION_RENEWAL_THRESHOLD_MINUTES`: 粘性会话续期阈值（分钟，默认0）
 - `METRICS_WINDOW`: 实时指标统计窗口（分钟，1-60，默认5）
@@ -207,7 +254,7 @@ npm run service:stop          # 停止服务
 cp config/config.example.js config/config.js
 cp .env.example .env
 npm run setup  # 自动生成密钥并创建管理员账户
-```
+````
 
 ## Web界面功能
 
@@ -243,6 +290,7 @@ npm run setup  # 自动生成密钥并创建管理员账户
 ### API转发端点（多路由支持）
 
 #### Claude服务路由
+
 - `POST /api/v1/messages` - Claude消息处理（支持流式）
 - `POST /claude/v1/messages` - Claude消息处理（别名路由）
 - `POST /v1/messages/count_tokens` - Token计数Beta API
@@ -253,39 +301,46 @@ npm run setup  # 自动生成密钥并创建管理员账户
 - `GET /v1/organizations/:org_id/usage` - 组织使用统计
 
 #### Gemini服务路由
+
 - `POST /gemini/v1/models/:model:generateContent` - 标准Gemini API格式
 - `POST /gemini/v1/models/:model:streamGenerateContent` - Gemini流式
 - `GET /gemini/v1/models` - Gemini模型列表
 - 其他Gemini兼容路由（保持向后兼容）
 
 #### OpenAI兼容路由
+
 - `POST /openai/v1/chat/completions` - OpenAI格式转发（支持responses格式）
 - `POST /openai/claude/v1/chat/completions` - OpenAI格式转Claude
 - `POST /openai/gemini/v1/chat/completions` - OpenAI格式转Gemini
 - `GET /openai/v1/models` - OpenAI格式模型列表
 
 #### Droid (Factory.ai) 路由
+
 - `POST /droid/claude/v1/messages` - Droid Claude转发
 - `POST /droid/openai/v1/chat/completions` - Droid OpenAI转发
 
 #### Azure OpenAI 路由
+
 - `POST /azure/...` - Azure OpenAI API转发
 
 ### 管理端点
 
 #### OAuth和账户管理
+
 - `POST /admin/claude-accounts/generate-auth-url` - 生成OAuth授权URL（含代理）
 - `POST /admin/claude-accounts/exchange-code` - 交换authorization code
 - `POST /admin/claude-accounts` - 创建Claude OAuth账户
 - 各平台账户CRUD端点（gemini、openai、bedrock、azure、droid、ccr）
 
 #### 用户管理（USER_MANAGEMENT_ENABLED启用时）
+
 - `POST /users/register` - 用户注册
 - `POST /users/login` - 用户登录
 - `GET /users/profile` - 用户资料
 - `POST /users/api-keys` - 创建用户API Key
 
 #### Webhook管理
+
 - `GET /admin/webhook/configs` - 获取Webhook配置
 - `POST /admin/webhook/configs` - 创建Webhook配置
 - `PUT /admin/webhook/configs/:id` - 更新Webhook配置
@@ -328,7 +383,7 @@ npm run setup  # 自动生成密钥并创建管理员账户
 8. **Webhook通知失败**:
    - 确认WEBHOOK_ENABLED=true
    - 检查WEBHOOK_URLS格式（逗号分隔）
-   - 查看logs/webhook-*.log日志
+   - 查看logs/webhook-\*.log日志
 9. **统一调度器选择账户失败**:
    - 检查账户状态（status: 'active'）
    - 确认账户类型与请求路由匹配
@@ -357,11 +412,26 @@ npm run setup  # 自动生成密钥并创建管理员账户
 
 ### 代码格式化要求
 
-- **必须使用 Prettier 格式化所有代码**
-- 后端代码（src/）：运行 `npx prettier --write <file>` 格式化
-- 前端代码（web/admin-spa/）：已安装 `prettier-plugin-tailwindcss`，运行 `npx prettier --write <file>` 格式化
-- 提交前检查格式：`npx prettier --check <file>`
-- 格式化所有文件：`npm run format`（如果配置了此脚本）
+**必须使用 Prettier 格式化所有代码**
+
+```bash
+# 格式化单个文件
+npx prettier --write <file>
+
+# 格式化所有文件
+npm run format
+
+# 检查格式（不修改）
+npm run format:check
+# 或
+npx prettier --check <file>
+```
+
+**注意事项：**
+
+- 后端代码（src/）使用标准 Prettier 配置
+- 前端代码（web/admin-spa/）已安装 `prettier-plugin-tailwindcss`，会自动排序 Tailwind CSS 类名
+- 提交代码前必须运行格式化检查
 
 ### 前端开发特殊要求
 
@@ -385,11 +455,49 @@ npm run setup  # 自动生成密钥并创建管理员账户
 
 ### 测试和质量保证
 
-- 运行 `npm run lint` 进行代码风格检查（使用 ESLint）
-- 运行 `npm test` 执行测试套件（Jest + SuperTest 配置）
-- 在修改核心服务后，使用 CLI 工具验证功能：`npm run cli status`
-- 检查日志文件 `logs/claude-relay-*.log` 确认服务正常运行
-- 注意：当前项目缺少实际测试文件，建议补充单元测试和集成测试
+**代码质量检查：**
+
+```bash
+# ESLint 代码风格检查（自动修复）
+npm run lint
+
+# ESLint 检查（不修复）
+npm run lint:check
+
+# Prettier 格式检查
+npm run format:check
+
+# Prettier 格式化
+npm run format
+```
+
+**测试执行：**
+
+```bash
+# 运行所有测试（Jest + SuperTest）
+npm test
+
+# 注意：当前项目测试覆盖率较低，建议补充：
+# - 单元测试：src/services/、src/utils/ 核心功能
+# - 集成测试：src/routes/ API 端点
+# - E2E测试：完整的认证和代理流程
+```
+
+**功能验证：**
+
+```bash
+# 检查服务状态
+npm run service:status
+
+# 使用 CLI 工具验证功能
+npm run cli status
+
+# 查看日志确认服务正常
+npm run service:logs
+
+# 检查 Redis 数据
+npm run data:debug
+```
 
 ### 开发工作流
 
@@ -575,10 +683,79 @@ npm run test:pricing-fallback  # 测试价格回退
 npm run monitor  # 增强监控脚本
 ```
 
+---
+
+## 快速参考
+
+### 最常用命令速查
+
+```bash
+# 首次部署
+npm install && npm run install:web && npm run build:web && npm run setup
+
+# 开发调试
+npm run dev                      # 启动开发服务器（热重载）
+npm run service:logs:follow      # 实时查看日志
+npm run cli status              # 查看系统状态
+
+# 代码提交前
+npm run format                  # 格式化代码
+npm run lint                    # 检查代码风格
+npm test                        # 运行测试
+
+# 生产部署
+npm run service:start:daemon    # 后台启动服务
+npm run service:status          # 检查服务状态
+```
+
+### 关键文件路径速查
+
+| 类型       | 路径               | 说明                 |
+| ---------- | ------------------ | -------------------- |
+| 配置文件   | `config/config.js` | 主配置文件           |
+| 环境变量   | `.env`             | 环境变量配置         |
+| 管理员凭据 | `data/init.json`   | 自动生成的管理员账号 |
+| 日志目录   | `logs/`            | 所有日志文件         |
+| 核心服务   | `src/services/`    | 30+服务文件          |
+| 路由定义   | `src/routes/`      | 13个路由文件         |
+| 工具函数   | `src/utils/`       | 通用工具函数         |
+| CLI工具    | `cli/index.js`     | 命令行工具入口       |
+| Web界面    | `web/admin-spa/`   | 前端SPA应用          |
+
+### 端口和URL速查
+
+| 服务        | 默认URL                                            | 说明                  |
+| ----------- | -------------------------------------------------- | --------------------- |
+| Web管理界面 | `http://localhost:3000/admin-next/`                | 新版SPA界面           |
+| Claude API  | `http://localhost:3000/api/v1/messages`            | Claude消息API         |
+| Gemini API  | `http://localhost:3000/gemini/v1/models/:model`    | Gemini API            |
+| OpenAI API  | `http://localhost:3000/openai/v1/chat/completions` | OpenAI兼容API         |
+| Codex API   | `http://localhost:3000/openai/v1/chat/completions` | Codex (Responses格式) |
+| 健康检查    | `http://localhost:3000/health`                     | 服务健康状态          |
+| 系统指标    | `http://localhost:3000/metrics`                    | 使用统计              |
+
+### 项目规划文件速查
+
+| 类型           | 路径                                                                 | 说明                         |
+| -------------- | -------------------------------------------------------------------- | ---------------------------- |
+| Sprint 状态    | `/Users/episkey/MyProjects/claude-relay-service/.bmad-ephemeral/sprint-status.yaml`                                 | 跟踪开发进度和故事状态       |
+| Epic 文档      | `/Users/episkey/MyProjects/claude-relay-service/docs/epics.md`                                                      | Epic 概览和作用域定义        |
+| 产品需求文档   | `/Users/episkey/MyProjects/claude-relay-service/docs/PRD.md`                                                        | 完整的产品需求和规格说明     |
+
+这些文件是使用 BMAD (Building Modern Apps with AI Developers) 方法论管理的项目核心规划文档：
+- **sprint-status.yaml**: 实时跟踪故事（Story）的状态（TODO/IN_PROGRESS/DONE），管理开发队列
+- **epics.md**: 定义各个 Epic 的目标、范围和优先级
+- **PRD.md**: 详细的产品需求文档，包含功能规格、技术要求、验收标准等
+
+---
+
 # important-instruction-reminders
 
 Do what has been asked; nothing more, nothing less.
 NEVER create files unless they're absolutely necessary for achieving your goal.
 ALWAYS prefer editing an existing file to creating a new one.
 NEVER proactively create documentation files (\*.md) or README files. Only create documentation files if explicitly requested by the User.
-````
+
+```
+
+```
