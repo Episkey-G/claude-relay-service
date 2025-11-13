@@ -33,11 +33,102 @@ QuotaLane 项目采用**源码优先**的 Git 提交策略：
   - 确保代码生成的可重复性和一致性
   - 构建验证在 GitHub Actions 中执行
 
-**提交命令示例**：
+**Git 工作流规范**：
+
+本项目采用 **Pull Request (PR) 审核流程**，所有代码变更必须通过以下步骤：
+
+1. **创建功能分支**：
+   ```bash
+   git checkout -b <branch-name>  # 如: feature/add-service, fix/bug-name
+   ```
+
+2. **提交代码到分支**：
+   ```bash
+   git add <files>
+   git commit -m "<commit-message>"
+
+   # Commit Message 格式：
+   # <type>: <subject>
+   #
+   # <body>
+   #
+   # 🤖 Generated with [Claude Code](https://claude.com/claude-code)
+   #
+   # Co-Authored-By: Claude <noreply@anthropic.com>
+   ```
+
+3. **推送分支并创建 PR**：
+   ```bash
+   git push -u origin <branch-name>
+   gh pr create --title "<PR 标题>" --body "<PR 描述>"
+   ```
+
+4. **等待审核和合并**：用户审核 PR 后合并到 main 分支
+
+5. **删除已合并分支**：
+   ```bash
+   git checkout main
+   git pull origin main
+   git branch -d <branch-name>           # 删除本地分支
+   git push origin --delete <branch-name> # 删除远程分支
+   ```
+
+**Commit Message 规范**：
+- **type**: `feat` (新功能), `fix` (修复), `docs` (文档), `style` (格式), `refactor` (重构), `test` (测试), `chore` (构建/工具)
+- **subject**: 简短描述（50字符以内）
+- **body**: 详细说明变更内容、原因、影响
+
+**PR 描述模板**：
+```markdown
+## 问题描述
+简要描述要解决的问题或添加的功能
+
+## 修复内容 / 新增功能
+- ✅ 修复项 1
+- ✅ 修复项 2
+- ✅ 新增功能 3
+
+## 验证
+- 本地测试通过
+- CI/CD 构建成功
+
+## 相关文件
+- [文件1](链接) - 说明
+- [文件2](链接) - 说明
+```
+
+**QuotaLane 提交示例**：
 ```bash
 cd QuotaLane
+git checkout -b feat/add-proto-interfaces
 git add api/**/*.proto Makefile go.mod go.sum configs/ cmd/ internal/
-git commit -m "feat: 添加新的 Proto 接口定义"
+git commit -m "feat: 添加 7 个核心 Proto 接口定义
+
+定义 AccountService, GatewayService, AuthService 等 7 个 gRPC 服务接口，
+使用 Proto3 语法，支持字段验证注解和 HTTP Gateway 映射。
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>"
+git push -u origin feat/add-proto-interfaces
+gh pr create --title "feat: 添加 7 个核心 Proto 接口定义" --body "$(cat <<'EOF'
+## 问题描述
+Story 1.4 - 定义 7 个核心 gRPC 服务接口
+
+## 新增功能
+- ✅ AccountService - 账户管理
+- ✅ GatewayService - AI 网关服务（流式响应）
+- ✅ AuthService - API Key 认证
+- ✅ UserService - 用户管理
+- ✅ PlanService - 套餐管理
+- ✅ BillingService - 账单管理
+- ✅ AdminService - 管理后台
+
+## 验证
+- 本地 `make proto` 编译通过
+- CI/CD 自动生成代码验证通过
+EOF
+)"
 ```
 
 ## 核心架构
